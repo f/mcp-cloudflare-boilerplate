@@ -46,81 +46,97 @@ oauthApp.use('/oauth/consent', sessionMiddleware);
 
 // OAuth Authorization endpoint
 oauthApp.get("/oauth/authorize", async (c) => {
-  const url = new URL(c.req.url);
-  const clientId = url.searchParams.get('client_id');
-  const redirectUri = url.searchParams.get('redirect_uri');
-  const responseType = url.searchParams.get('response_type');
-  const scope = url.searchParams.get('scope');
-  const state = url.searchParams.get('state');
-  const codeChallenge = url.searchParams.get('code_challenge');
-  const codeChallengeMethod = url.searchParams.get('code_challenge_method');
-
-  if (!clientId || !redirectUri || responseType !== 'code') {
-    return c.text("Invalid request", 400);
-  }
-
-  // Look up client in our database
   const db = new DatabaseService(c.env.DATABASE_URL);
-  await db.connect();
-
+  
   try {
-    const application = await db.getOAuthApplicationByClientId(clientId);
-    if (!application) {
-      return c.text("Invalid client_id", 400);
+    const url = new URL(c.req.url);
+    const clientId = url.searchParams.get('client_id');
+    const redirectUri = url.searchParams.get('redirect_uri');
+    const responseType = url.searchParams.get('response_type');
+    const scope = url.searchParams.get('scope');
+    const state = url.searchParams.get('state');
+    const codeChallenge = url.searchParams.get('code_challenge');
+    const codeChallengeMethod = url.searchParams.get('code_challenge_method');
+
+    if (!clientId || !redirectUri || responseType !== 'code') {
+      return c.text("Invalid request", 400);
     }
 
-    // Check if redirect URI is valid
-    const validRedirectUris = application.redirect_uri.split('\n');
-    if (!validRedirectUris.includes(redirectUri)) {
-      return c.text("Invalid redirect_uri", 400);
-    }
+    // Connect to database
+    await db.connect();
 
-    // Store OAuth request info
-    const oauthReqInfo = {
-      responseType,
-      clientId,
-      redirectUri,
-      scope: scope ? scope.split(' ') : ['read'],
-      state: state || '',
-      codeChallenge,
-      codeChallengeMethod
-    };
+    try {
+      const application = await db.getOAuthApplicationByClientId(clientId);
+      if (!application) {
+        return c.text("Invalid client_id", 400);
+      }
 
-    // Check if user is already logged in
-    const user = getCurrentUser(c);
-    
-    if (user) {
-      // User is logged in, show consent page
-      const consentPageData = {
-        application: {
-          name: application.name,
-          client_uri: application.client_uri,
-          logo_uri: application.logo_uri,
-          tos_uri: application.tos_uri,
-          policy_uri: application.policy_uri
-        },
-        scopes: oauthReqInfo.scope,
-        user: {
-          name: user.name,
-          username: user.username,
-          email: user.email
-        },
-        oauthState: btoa(JSON.stringify(oauthReqInfo))
+      // Check if redirect URI is valid
+      const validRedirectUris = application.redirect_uri.split('\n');
+      if (!validRedirectUris.includes(redirectUri)) {
+        return c.text("Invalid redirect_uri", 400);
+      }
+
+      // Store OAuth request info
+      const oauthReqInfo = {
+        responseType,
+        clientId,
+        redirectUri,
+        scope: scope ? scope.split(' ') : ['read'],
+        state: state || '',
+        codeChallenge,
+        codeChallengeMethod
       };
 
-      const html = generateConsentPage(consentPageData);
-      return c.html(html);
-    } else {
-      // User not logged in, redirect to login with OAuth info
-      return redirectToLogin(c.req.raw, oauthReqInfo);
+      // Check if user is already logged in
+      const user = getCurrentUser(c);
+      
+      if (user) {
+        // User is logged in, show consent page
+        const consentPageData = {
+          application: {
+            name: application.name,
+            client_uri: application.client_uri,
+            logo_uri: application.logo_uri,
+            tos_uri: application.tos_uri,
+            policy_uri: application.policy_uri
+          },
+          scopes: oauthReqInfo.scope,
+          user: {
+            name: user.name,
+            username: user.username,
+            email: user.email
+          },
+          oauthState: btoa(JSON.stringify(oauthReqInfo))
+        };
+
+        const html = generateConsentPage(consentPageData);
+        return c.html(html);
+      } else {
+        // User not logged in, redirect to login with OAuth info
+        return redirectToLogin(c.req.raw, oauthReqInfo);
+      }
+    } catch (error) {
+      console.error("OAuth authorization error:", error);
+      return c.text("Internal server error", 500);
     }
+  } catch (error) {
+    console.error("OAuth authorization endpoint error:", error);
+    return c.text("Internal server error", 500);
   } finally {
-    await db.disconnect();
+    // Always close the database connection, even if an error occurs
+    try {
+      await db.disconnect();
+    } catch (disconnectError) {
+      console.error("Error disconnecting from database:", disconnectError);
+    }
   }
 });
 
 // OAuth Consent endpoint - handles consent form submission
 oauthApp.post("/oauth/consent", async (c) => {
+  const db = new DatabaseService(c.env.DATABASE_URL);
+  
   try {
     const body = await c.req.json();
     const { action, state } = body;
@@ -156,10 +172,9 @@ oauthApp.post("/oauth/consent", async (c) => {
     }
 
     if (action === 'approve') {
-      // User approved consent, create authorization code
-      const db = new DatabaseService(c.env.DATABASE_URL);
+      // Connect to database
       await db.connect();
-
+      
       try {
         // Verify client exists
         const application = await db.getOAuthApplicationByClientId(oauthReqInfo.clientId);
@@ -167,8 +182,8 @@ oauthApp.post("/oauth/consent", async (c) => {
           return c.json({ message: "Invalid client" }, 400);
         }
 
-        // Create OAuth2 model instance
-        const oauth2Model = new OAuth2Model(c.env.DATABASE_URL);
+        // Create OAuth2 model instance with the existing database connection
+        const oauth2Model = new OAuth2Model(c.env.DATABASE_URL, db);
         
         // Create authorization code using OAuth2 model
         const authCode = oauth2Model.generateAuthorizationCode(
@@ -217,8 +232,9 @@ oauthApp.post("/oauth/consent", async (c) => {
         }
 
         return c.json({ redirectTo: redirectUrl.href });
-      } finally {
-        await db.disconnect();
+      } catch (error) {
+        console.error("OAuth consent database error:", error);
+        return c.json({ message: "Database error processing consent" }, 500);
       }
     }
 
@@ -226,6 +242,13 @@ oauthApp.post("/oauth/consent", async (c) => {
   } catch (error) {
     console.error("OAuth consent error:", error);
     return c.json({ message: "Internal server error" }, 500);
+  } finally {
+    // Always close the database connection, even if an error occurs
+    try {
+      await db.disconnect();
+    } catch (disconnectError) {
+      console.error("Error disconnecting from database:", disconnectError);
+    }
   }
 });
 
@@ -305,6 +328,8 @@ oauthApp.post("/oauth/authorize", async (c) => {
 
 // OAuth Client Registration endpoint (RFC 7591)
 oauthApp.post("/oauth/applications", async (c) => {
+  const db = new DatabaseService(c.env.DATABASE_URL);
+  
   try {
     const body = await c.req.json();
     const { 
@@ -345,7 +370,6 @@ oauthApp.post("/oauth/applications", async (c) => {
       }
     }
 
-    const db = new DatabaseService(c.env.DATABASE_URL);
     await db.connect();
 
     try {
@@ -373,51 +397,64 @@ oauthApp.post("/oauth/applications", async (c) => {
         client_id_issued_at: Math.floor(new Date(application.created_at).getTime() / 1000),
         client_secret_expires_at: 0 // Never expires
       }, 201);
-
-    } finally {
-      await db.disconnect();
+    } catch (error) {
+      console.error("OAuth client registration database error:", error);
+      return c.json({ 
+        error: "server_error",
+        error_description: "Database error during client registration" 
+      }, 500);
     }
-
   } catch (error) {
     console.error("OAuth client registration error:", error);
     return c.json({ 
       error: "server_error",
       error_description: "Internal server error during client registration" 
     }, 500);
+  } finally {
+    // Always close the database connection, even if an error occurs
+    try {
+      await db.disconnect();
+    } catch (disconnectError) {
+      console.error("Error disconnecting from database:", disconnectError);
+    }
   }
 });
 
 // List OAuth applications endpoint
 oauthApp.get("/oauth/applications", async (c) => {
+  const db = new DatabaseService(c.env.DATABASE_URL);
+  
   try {
-    const db = new DatabaseService(c.env.DATABASE_URL);
     await db.connect();
+    
+    const applications = await db.listOAuthApplications();
+    
+    // Return applications without exposing client secrets
+    const safeApplications = applications.map(app => ({
+      client_id: app.uid,
+      client_name: app.name,
+      redirect_uris: app.redirect_uri.split('\n'),
+      scopes: app.scopes,
+      client_uri: app.client_uri,
+      logo_uri: app.logo_uri,
+      created_at: app.created_at,
+      updated_at: app.updated_at
+    }));
 
-    try {
-      const applications = await db.listOAuthApplications();
-      
-      // Return applications without exposing client secrets
-      const safeApplications = applications.map(app => ({
-        client_id: app.uid,
-        client_name: app.name,
-        redirect_uris: app.redirect_uri.split('\n'),
-        scopes: app.scopes,
-        client_uri: app.client_uri,
-        logo_uri: app.logo_uri,
-        created_at: app.created_at,
-        updated_at: app.updated_at
-      }));
-
-      return c.json(safeApplications);
-    } finally {
-      await db.disconnect();
-    }
+    return c.json(safeApplications);
   } catch (error) {
     console.error("OAuth applications listing error:", error);
     return c.json({ 
       error: "server_error",
       error_description: "Internal server error while listing applications" 
     }, 500);
+  } finally {
+    // Always close the database connection, even if an error occurs
+    try {
+      await db.disconnect();
+    } catch (disconnectError) {
+      console.error("Error disconnecting from database:", disconnectError);
+    }
   }
 });
 

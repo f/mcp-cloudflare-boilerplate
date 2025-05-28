@@ -400,8 +400,13 @@ psql "postgresql://username:password@host:port/database"
 
 #### OAuth Login Hanging
 - **Cause**: Usually database connection or OAuth token generation issues
-- **Fix**: Check database connectivity and ensure all secrets are set correctly
-- **Debug**: Check Cloudflare Workers logs in the dashboard
+- **Fix**: 
+  - Check database connectivity and ensure all secrets are set correctly
+  - Ensure database connections are properly closed (especially in error cases)
+  - If using the `/oauth/token` endpoint, verify the database connection isn't timing out
+- **Debug**: 
+  - Check Cloudflare Workers logs in the dashboard
+  - Look for database timeouts or connection errors
 
 #### "Invalid client_id" Errors
 ```bash

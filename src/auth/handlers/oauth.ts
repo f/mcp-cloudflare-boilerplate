@@ -231,8 +231,14 @@ oauthApp.post("/oauth/consent", async (c) => {
 
 // OAuth Authorization POST endpoint - handles user consent after login
 oauthApp.post("/oauth/authorize", async (c) => {
+  // Create a single database connection for the entire authorization flow
+  const db = new DatabaseService(c.env.DATABASE_URL);
+  
   try {
-    const oauth2Server = createOAuth2Server(c.env.DATABASE_URL);
+    await db.connect();
+    
+    // Create OAuth2 server with the shared database connection
+    const oauth2Server = createOAuth2Server(c.env.DATABASE_URL, db);
     
     // Get form data
     const formData = await c.req.formData();
@@ -265,19 +271,13 @@ oauthApp.post("/oauth/authorize", async (c) => {
             const userId = request.body.user_id;
             if (!userId) return null;
 
-            const db = new DatabaseService(c.env.DATABASE_URL);
-            await db.connect();
-            try {
-              const user = await db.getUserById(userId);
-              return user ? {
-                id: user.id,
-                username: user.username,
-                email: user.email,
-                name: user.name
-              } : null;
-            } finally {
-              await db.disconnect();
-            }
+            const user = await db.getUserById(userId);
+            return user ? {
+              id: user.id,
+              username: user.username,
+              email: user.email,
+              name: user.name
+            } : null;
           }
         }
       });
@@ -293,6 +293,13 @@ oauthApp.post("/oauth/authorize", async (c) => {
       error: "server_error",
       error_description: "Internal server error"
     }, 500);
+  } finally {
+    // Always close the database connection, even if an error occurs
+    try {
+      await db.disconnect();
+    } catch (disconnectError) {
+      console.error("Error disconnecting from database:", disconnectError);
+    }
   }
 });
 

@@ -499,6 +499,8 @@ oauthApp.post("/oauth/token", async (c) => {
 
 // OAuth Token Revocation endpoint (RFC 7009)
 oauthApp.post("/oauth/revoke", async (c) => {
+  const db = new DatabaseService(c.env.DATABASE_URL);
+  
   try {
     // Get form data
     const formData = await c.req.formData();
@@ -516,8 +518,7 @@ oauthApp.post("/oauth/revoke", async (c) => {
       }, 400);
     }
 
-    // Use our database service directly for token revocation
-    const db = new DatabaseService(c.env.DATABASE_URL);
+    // Connect to database
     await db.connect();
     
     try {
@@ -537,8 +538,13 @@ oauthApp.post("/oauth/revoke", async (c) => {
 
       // RFC 7009 specifies that revocation should return 200 even if token was invalid
       return new Response(null, { status: 200 });
-    } finally {
-      await db.disconnect();
+    } catch (error) {
+      console.error("Token revocation error:", error);
+      // RFC 7009 specifies returning an error for server errors
+      return c.json({
+        error: "server_error",
+        error_description: "Internal server error"
+      }, 500);
     }
   } catch (error) {
     console.error("OAuth revocation endpoint error:", error);
@@ -546,11 +552,20 @@ oauthApp.post("/oauth/revoke", async (c) => {
       error: "server_error",
       error_description: "Internal server error"
     }, 500);
+  } finally {
+    // Always close the database connection, even if an error occurs
+    try {
+      await db.disconnect();
+    } catch (disconnectError) {
+      console.error("Error disconnecting from database:", disconnectError);
+    }
   }
 });
 
 // OAuth Token Introspection endpoint (RFC 7662)
 oauthApp.post("/oauth/introspect", async (c) => {
+  const db = new DatabaseService(c.env.DATABASE_URL);
+  
   try {
     // Get form data
     const formData = await c.req.formData();
@@ -566,36 +581,32 @@ oauthApp.post("/oauth/introspect", async (c) => {
     }
 
     try {
-      // Try to get access token info
-      const db = new DatabaseService(c.env.DATABASE_URL);
+      // Connect to database
       await db.connect();
       
-      try {
-        const accessToken = await db.findOAuthAccessTokenByToken(token);
-        if (!accessToken) {
-          return c.json({ active: false });
-        }
-
-        const application = await db.getOAuthApplicationById(accessToken.application_id);
-        const user = await db.getUserById(accessToken.user_id);
-
-        if (!application || !user) {
-          return c.json({ active: false });
-        }
-
-        return c.json({
-          active: true,
-          scope: accessToken.scopes,
-          client_id: application.uid,
-          username: user.username,
-          exp: Math.floor(accessToken.expires_at.getTime() / 1000),
-          iat: Math.floor(new Date(accessToken.created_at).getTime() / 1000),
-          sub: user.id,
-          aud: application.uid
-        });
-      } finally {
-        await db.disconnect();
+      // Try to get access token info
+      const accessToken = await db.findOAuthAccessTokenByToken(token);
+      if (!accessToken) {
+        return c.json({ active: false });
       }
+
+      const application = await db.getOAuthApplicationById(accessToken.application_id);
+      const user = await db.getUserById(accessToken.user_id);
+
+      if (!application || !user) {
+        return c.json({ active: false });
+      }
+
+      return c.json({
+        active: true,
+        scope: accessToken.scopes,
+        client_id: application.uid,
+        username: user.username,
+        exp: Math.floor(accessToken.expires_at.getTime() / 1000),
+        iat: Math.floor(new Date(accessToken.created_at).getTime() / 1000),
+        sub: user.id,
+        aud: application.uid
+      });
     } catch (error) {
       console.error("Token introspection error:", error);
       return c.json({ active: false });
@@ -606,6 +617,13 @@ oauthApp.post("/oauth/introspect", async (c) => {
       error: "server_error",
       error_description: "Internal server error"
     }, 500);
+  } finally {
+    // Always close the database connection, even if an error occurs
+    try {
+      await db.disconnect();
+    } catch (disconnectError) {
+      console.error("Error disconnecting from database:", disconnectError);
+    }
   }
 });
 

@@ -5,13 +5,21 @@ import { DatabaseService } from '../database';
 // OAuth2 Server Model implementation
 export class OAuth2Model {
   private databaseUrl: string;
+  private existingDb?: DatabaseService;
 
-  constructor(databaseUrl: string) {
+  constructor(databaseUrl: string, existingDb?: DatabaseService) {
     this.databaseUrl = databaseUrl;
+    this.existingDb = existingDb;
   }
 
   // Helper method to create a fresh database connection
   private async withDatabase<T>(callback: (db: DatabaseService) => Promise<T>): Promise<T> {
+    // If we have an existing database connection, use it without connecting/disconnecting
+    if (this.existingDb) {
+      return await callback(this.existingDb);
+    }
+    
+    // Otherwise create a new connection
     const db = new DatabaseService(this.databaseUrl);
     await db.connect();
     try {
@@ -262,8 +270,8 @@ export class OAuth2Model {
 }
 
 // Create OAuth2 server instance
-export function createOAuth2Server(databaseUrl: string): OAuth2Server {
-  const model = new OAuth2Model(databaseUrl);
+export function createOAuth2Server(databaseUrl: string, existingDb?: DatabaseService): OAuth2Server {
+  const model = new OAuth2Model(databaseUrl, existingDb);
   
   return new OAuth2Server({
     model: model as any,

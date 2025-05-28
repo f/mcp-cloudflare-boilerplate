@@ -416,8 +416,14 @@ oauthApp.get("/oauth/applications", async (c) => {
 
 // OAuth Token endpoint
 oauthApp.post("/oauth/token", async (c) => {
+  // Create a single database connection for the entire token flow
+  const db = new DatabaseService(c.env.DATABASE_URL);
+  
   try {
-    const oauth2Server = createOAuth2Server(c.env.DATABASE_URL);
+    await db.connect();
+    
+    // Create OAuth2 server with the shared database connection
+    const oauth2Server = createOAuth2Server(c.env.DATABASE_URL, db);
     
     // Get form data
     const formData = await c.req.formData();
@@ -474,6 +480,13 @@ oauthApp.post("/oauth/token", async (c) => {
       error: "server_error",
       error_description: "Internal server error"
     }, 500);
+  } finally {
+    // Always close the database connection, even if an error occurs
+    try {
+      await db.disconnect();
+    } catch (disconnectError) {
+      console.error("Error disconnecting from database:", disconnectError);
+    }
   }
 });
 

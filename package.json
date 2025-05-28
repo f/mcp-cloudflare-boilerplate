@@ -1,0 +1,33 @@
+{
+  "name": "remote-mcp-custom-oauth",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
+    "cf-typegen": "wrangler types",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@node-oauth/oauth2-server": "^5.2.0",
+    "agents": "^0.0.93",
+    "bcryptjs": "^2.4.3",
+    "hono": "^4.7.10",
+    "jsonwebtoken": "^9.0.2",
+    "just-pick": "^4.2.0",
+    "pg": "^8.12.0",
+    "workers-mcp": "^0.0.13",
+    "zod": "^3.25.28"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.15.22",
+    "@types/pg": "^8.11.10",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.17.0"
+  }
+}

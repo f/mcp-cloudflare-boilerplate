@@ -1,0 +1,3 @@
+DATABASE_URL=postgresql://username:password@localhost:5432/mcp_server
+JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+COOKIE_ENCRYPTION_KEY=12345678901234567890123456789012
